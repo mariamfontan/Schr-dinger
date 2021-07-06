@@ -1,0 +1,268 @@
+//////////////////////////////////////////////////////////////////
+/////////////////Solución a la ecuación de Schrödinger////////////
+///////////////unidimensional para un potencial cuadrado//////////
+//////////////////////////////////////////////////////////////////
+#include <stdio.h>
+#include <math.h>
+#include "complex.h"
+#include "gsl_rng.h" 
+#include <stdbool.h>
+
+#define PI 3.14159265359
+
+
+gsl_rng *tau;
+
+
+int main()
+{
+    int m, j, x, n;
+	int N = 500;  //Tamaño de la celda  
+    int nc; //Número de ciclos 
+    int nD; //Pasos que evoluciona el sistema antes de aplicar los detectores
+	double Lambda; //Altura potencial
+    double k0, s, sigma, x0;
+
+	fcomplex phi[N+1],gamma[N+1],beta[N+1],alpha[N+1],chi[N+1], A0[N+1];
+    double V[N+1];
+
+    double modulo, norma, raiznorma, raiznorma_d, raiznorma_i;
+    double random;
+    double PD, pI; //Prob de que la partícula esté a la derecha o a la izquierda, respec.
+    double mT;     //Número de veces que se detecta la partícula a la derecha (transmitida)
+    double mR;     //Número de veces que se detecta la partícula a la izquierda (reflejada)
+    double R, T;   //Coef de transmisión y de reflexión
+    //mT y mR tienen que ser double para que al dividirlo entre 1000 de double (T y R))
+
+	bool detectada;
+
+    //Declaración de ficheros
+	FILE *f1, *f2, *f3;
+	//f1 = fopen("T_nD_05;","w"); //Para el cálculo de nD
+    //f2 = fopen("N2000.txt", "w"); //Para el cálculo de N
+    f3 = fopen("lambda10.txt", "w");
+
+    //Inicialización de variables 
+	Lambda = 10.;
+	nc = 20;
+
+    //Calculamos los parámetros directos k0, s , x0 y sigma
+    k0 = 2.0*PI*nc/N;
+    s = 1.0/(4*k0*k0);
+    x0 = N*1.0/4;
+    sigma = N*1.0/16;
+
+	
+	for(nD=1; nD<=100; nD++)
+	{
+	    mT = 0.0;
+	    mR = 0.0;	
+
+	    extern gsl_rng *tau; //Puntero al estado del número randomorio
+	    int semilla=12487; //Semilla del generador de números randomorios
+	    tau=gsl_rng_alloc(gsl_rng_taus); //Inicializamos el puntero
+        gsl_rng_set(tau,semilla); //Inicializamos la semilla
+
+
+        //Repetimos el experimento m veces
+        for(m=1; m<=1000; m++)
+        {
+            detectada = false;
+
+            raiznorma = 0.0;
+            raiznorma_d = 0.0;
+            raiznorma_i = 0.0;
+
+            random = 0.0;
+
+            //Calculo el potencial V
+            for (j=0; j<=N-1; j++)
+            {
+                if ((j>=2.0*N/5) && (j<=3.0*N/5))
+                {
+                    V[j] = Lambda*k0*k0;
+                }
+                else 
+                {
+                    V[j] = 0.0;
+                }      
+                //fprintf(f2, "%i\t%lf\n", j, V[j]);  
+                //printf("V= %lf\n", V[j]);
+               
+            }
+
+            //Condiciones de contorno de phi
+            phi[0] = Complex(0.0,0.0);
+            phi[N] = Complex(0.0,0.0);
+
+            //Condiciones de conntorno alpha, beta y chi
+            alpha[0] = Complex(0.,0.); 
+            alpha[N-1] = Complex(0.,0.);
+
+            beta[N-1] = Complex(0.,0.);
+            beta[0] = Complex(0.,0.);
+                   
+            chi[0] = Complex(0.,0.);
+            chi[N] = Complex(0.,0.);
+
+            //Calculo de alpha y gamma
+            for(j=N-1; j>=1; j--)
+            {
+                A0[j] = Complex(-2-V[j], 2.0/s);
+                gamma[j] = Cdiv(Complex(1.0,0.0), Cadd(A0[j], alpha[j]));
+
+                alpha[j-1].r = -gamma[j].r;
+                alpha[j-1].i = -gamma[j].i;
+            }
+
+            //Funcion de onda inicial
+            for(x=0; x<=N; x++)
+            {
+                phi[x] = Cgauss((k0*x), exp(-(x-x0)*(x-x0)/(2.0*sigma*sigma)));
+                modulo = Cabs(phi[x])*Cabs(phi[x]);
+                //printf("phi(x)= %lf", modulo[x]);
+            }
+            
+            
+            while(detectada == false)
+            {
+                //Evolución temporal
+                for(n=1; n<=nD; n++)
+                {
+                    for (j=N-1; j>=1; j--) //Calculo beta
+                    {
+                        beta[j-1] = Cmul(gamma[j], Csub(Cmul(Complex(0.0,4.0/s),phi[j]),beta[j]));
+                    }
+
+                    for (j=0; j<=N-1; j++) //Calculo chi
+                    {
+                        chi[j+1] = Cadd(Cmul(alpha[j],chi[j]), beta[j]);
+                    }
+
+	                for(j=0; j<=N-1; j++)  //Calculo phi
+	                {
+	                    phi[j] = Csub(chi[j], phi[j]);
+	                }
+
+                    norma = 0.0;
+	                for(j=0; j<=N-1; j++)  //Calculo la constante de normalización raiznorma
+	                {
+                        norma = norma + (Cabs(phi[j])*Cabs(phi[j]));
+	                    //printf("%lf\n",norma); 
+	                }
+	                raiznorma = 1./sqrt(norma);
+
+	                for(j=0; j<=N-1; j++) //Normalizo la función de onda
+	                {
+	                    phi[j] = RCmul(raiznorma, phi[j]);
+	                }
+
+                }//evolución temporal
+
+                //Solo cada nD pasos aplico los detectores
+
+                //Probabilidad de que esté a la derecha (entre (4/5)N y N)
+                PD = 0.0;
+                for(j=4*N/5;  j<=N; j++)
+                {
+                    PD = PD + (Cabs(phi[j])*Cabs(phi[j]));
+                }
+
+                //Genero un número aleatorio entre 0 y 1
+                random = gsl_rng_uniform(tau); 
+
+                if(random < PD)
+                {
+	                mT = mT + 1.0;
+	                detectada = true;  
+                }
+
+                else
+                {
+	                //printf("else");
+
+                    //Si no está la partícula a la derecha, hago phi[j]=0 para j E [(4N/5), N]
+	                for(j=4*N/5; j<=N; j++)//Hacemos phi nula
+	                {
+	                    phi[j] = Complex(0.0,0.0);
+	                    //printf("%lf+%lf i\n\n",phi[j].r,phi[j].i);
+	                }
+                    
+                    //Hay que volver a normalizar la función de onda
+	                norma = 0.0;
+	                for(j=0;j<=N-1;j++) //Calculo la norma
+	                {
+	                    norma = norma + (Cabs(phi[j])*Cabs(phi[j]));
+	                }
+	                raiznorma_d = 1./sqrt(norma);
+
+	                for(j=0;j<=N-1;j++)//Normalizo phi
+	                {
+	                    phi[j] = RCmul(raiznorma_d,phi[j]);
+	                }
+
+                    //Probabilidad de que esté a la izquierda (entre 0 y N/5)
+	                pI = 0.0;
+	                for(j=0; j<=N/5; j++)
+	                {
+	                    pI = pI + (Cabs(phi[j])*Cabs(phi[j]));
+
+	                }
+
+                    //Genero un número aleatorio entre 0 y 1
+	                random = gsl_rng_uniform(tau);
+     
+	                if(random < pI)
+	                {
+		                mR = mR + 1.0;
+		                detectada = true;
+	                }
+
+	                else
+	                {
+                        //Si no está la partícula a la izquierda, hago phi[j]=0 para j E [0, N/5]
+		                for(j=0;j<=N/5;j++)
+		                {
+		                    phi[j]=Complex(0.0,0.0);
+		                }
+		                norma = 0.0;
+		                for(j=0; j<=N-1; j++) //Hay que volver a normalizar
+		                {
+		                    norma = norma + (Cabs(phi[j])*Cabs(phi[j]));
+		                }
+		                raiznorma_i = 1./sqrt(norma);
+
+		                for(j=0; j<=N-1; j++) //Normalizo phi
+		                {
+		                    phi[j] = RCmul(raiznorma_i,phi[j]);
+		                }
+	                }//segundo else
+                }//primer else 
+            }//bucle while
+        //printf ("%i\n", m);
+        }//termina el experimento
+
+        //Coeficiente de transmisión
+        T = mT / 1000; //Coef de transmisión
+        R = mR / 1000;
+
+//Para el cálculo de nD
+        //printf("mT = %lf\n", mT);
+        //fprintf(f1,"%lf\t%i\n", T, nD);
+
+
+        //printf("\n\n\n\n\n");
+        //printf("%i\n", nD);
+
+        }//bucle nD
+
+//Para el cálculo de N
+       // fprintf(f2, "%lf\t%i\n", T, N);
+
+
+//Para el cálculo de lambda
+        fprintf(f3, "%lf\t%lf\n", T, Lambda);
+  
+
+        return 0;
+    }
